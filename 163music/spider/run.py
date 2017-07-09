@@ -108,6 +108,7 @@ def has_not_class_and_has_not_id(tag):
 
 
 class carwlerSheet(threading.Thread):
+
     """
         根据歌单url爬取
         url:歌单url
@@ -157,6 +158,7 @@ def main(url):
             for link in s('a'):
                 type_name = link.get_text()
                 type_id = insertToDB(sql='insert into t_music_type (style_id, name) values (%s, %s)', params=(style_id, type_name))
+                """
                 sheet_thread = crawlSheet('%s%s' % (host, link.get('href')), type_id)
                 threads.append(sheet_thread)
                 sheet_thread.start()
@@ -164,6 +166,7 @@ def main(url):
 
     for thread in threads:
         thread.join()
+                """
 
 
 if __name__ == '__main__':
