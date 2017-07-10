@@ -36,25 +36,11 @@ sheet_author_pattern = re.compile(r'nm.*nm-icn.*f-thide')
 current_page_pattern = re.compile(r'js-selected')
 #redis_pool = redis.ConnectionPool(host='127.0.0.1', port=6379)
 #redis_conn = redis.Redis(connection_pool=redis_pool)
-#mysql_conn = pymysql.connect(host='127.0.0.1', port=3306, user='root', passwd='zm123456', db='163music', charset='utf8')
-#cursor = None
+mysql_conn = pymysql.connect(host='127.0.0.1', port=3306, user='root', passwd='zm123456', db='163music', charset='utf8')
+cursor = None
 #thread_pool = threadpool.ThreadPool()
 i = 0
 
-"""不用多线程
-class crawlSheet(threading.Thread):
-    def __init__(self, url, type_id):
-        threading.Thread.__init__(self)
-        self.url = url
-        self.type_id = type_id
-
-    def run(self):
-        #默认是爬取热门
-        crawl(self.url, self.type_id)
-        # 最新
-        only_new_wrap = SoupStrainer(name='a', attrs={'data-order': 'new'})
-        soup_new = BeautifulSoup(text, 'lxml', parse_only=only_new_wrap)
-"""
 
 def crawlSheet(url, type_id):
     global i
@@ -83,7 +69,7 @@ def crawlSheet(url, type_id):
             sheet['author'] = temp_author.string
             sheet['author_url'] = '%s%s' % (host, temp_author['href'])
         sheets.append(sheet)
-
+    """
     # 单独获取分页容器
     soup_pagination = soup_sheets(name='div', id='m-pl-pager')
     # 获取当前页的下一页
@@ -92,36 +78,34 @@ def crawlSheet(url, type_id):
         if soup_next and 'js-disabled' not in soup_next['class']:
             next_url = host + soup_next['href']
             crawlSheet(next_url, type_id)
-        else:
-            pass
-            #解析最新
-    else:
-        pass
-        """
-            # 最新
-            only_new_wrap = SoupStrainer(name='a', attrs={'data-order': 'new'})
-            soup_new = BeautifulSoup(text, 'lxml', parse_only=only_new_wrap)
-            if soup_new('a'):
-                new_url = soup_new('a')[0].get('href')
-                crawl('%s%s' % (host, new_url), type_id)#这里会不会new了之后不往下执行了
-                不用多线程
-                thread = crawlSheet('%s%s' % (host, new_url), type_id)
-                thread.start()
-                thread.join()
-            """
+        elif 'new' not in url:
+            #如果是最后一页就开始解析该类型的最新歌单
+            crawlNewSheet(text, type_id)
+    elif 'new' not in url:
+        # 如果只有一页就开始解析该类型的最新歌单
+        crawlNewSheet(text, type_id)
+    """
+
+def crawlNewSheet(text, type_id):
+    only_new_wrap = SoupStrainer(name='a', attrs={'data-order': 'new'})
+    soup_new = BeautifulSoup(text, 'lxml', parse_only=only_new_wrap)
+    if soup_new('a'):
+        new_url = soup_new('a')[0].get('href')
+        crawlSheet('%s%s' % (host, new_url), type_id)
+
 
 def has_not_class_and_has_not_id(tag):
     return not tag.has_attr('class') and not tag.has_attr('id')
 
 
-def carwlMusic(url, type_id):
+def crawlMusic(url, type_id):
     """
         获取歌曲信息
     :param url: 歌曲详情url
     :param type_id 歌曲所对应歌单所对应的类型ID
     :return: 
     """
-    response = requests.get(url)
+    response = requests.get(url, random.choice(USER_AGENTS))
     text = response.text
     only_wrap = SoupStrainer(name='textarea')
     soup = BeautifulSoup(text, 'lxml', parse_only=only_wrap)
@@ -131,31 +115,31 @@ def carwlMusic(url, type_id):
     musics_json = json.loads(str(soupTextarea('textarea')[0].string))
 
     musics = []
-    print(musics_json)
-    for json in musics_json:
+    for music_json in musics_json:
         music = {}
         singer_name = []
-        music['name'] = json['name']
-        music['duration'] = json['duration']
+        music['name'] = music_json['name']
+        music['duration'] = music_json['duration']
 
-        singers = json['artists']
+        singers = music_json['artists']
         for singer in singers:
             singer_name.append(singer['name'])
         music['singer'] = '/'.join(singer_name)
-        music['album'] = json['album']['name']
-        music['album_url'] = json['album']['picUrl']
+        music['album'] = music_json['album']['name']
+        music['album_url'] = music_json['album']['picUrl']
         musics.append(music)
-
+    print(musics_json)
 
 def insertToDB(sql, params):
     #cursor.execute(sql, params)
     #id = cursor.lastrowid
+    #return id
     return 1
 
 
 def main(url):
     """
-    解析歌曲风格和类型  启动每个类型线程爬取
+    解析歌曲风格和类型
     :param url: 
     :return: 
     """
@@ -164,7 +148,6 @@ def main(url):
     text = response.text
     only_wrap = SoupStrainer(name='dl', class_='f-cb')
     soup = BeautifulSoup(text, 'lxml', parse_only=only_wrap)
-    #threads = []
 
     for s in soup:
         if isinstance(s, Tag):
@@ -172,41 +155,27 @@ def main(url):
             style_id = insertToDB(sql='insert into t_music_style (name) values (%s)', params=style_name)
             for link in s('a'):
                 type_name = link.get_text()
-                type_id = insertToDB(sql='insert into t_music_type (style_id, name) values (%s, %s)', params=(style_id, type_name))
-                crawlSheet('%s%s' % (host, link.get('href')), type_id)
-                """不用多线程
-                sheet_thread = crawlSheet('%s%s' % (host, link.get('href')), type_id)
-                threads.append(sheet_thread)
-                sheet_thread.start()
-                sheet_thread.setDaemon(True)
-    
-    for thread in threads:
-        thread.join()
-                """
+                if type_name == '华语':
+                    type_id = insertToDB(sql='insert into t_music_type (style_id, name) values (%s, %s)', params=(style_id, type_name))
+                    crawlSheet('%s%s' % (host, link.get('href')), type_id)
+
 
 if __name__ == '__main__':
     print("开始：" + time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())))
     start = datetime.now()
-    #cursor = mysql_conn.cursor()
+    cursor = mysql_conn.cursor()
     main(url)
-    """
-    #threads = []
+    #保存所有歌单到数据库    根据所有歌单爬取歌曲并解析
     for sheet in sheets:
 
         sheet_id = insertToDB(sql='insert into t_music_sheet (type_id, name, url, profile_url, players) values (%s, %s, %s, %s, %s)',\
                    params=(sheet['type_id'], sheet['name'], sheet['url'], sheet['profile_url'], sheet['players']))
-        carwlerMusic('%s%s' % (host, link.get('href')), type_id)
-        thread = carwlerSheet(url=sheet['url'], sheet_id=sheet_id)
-        threads.append(thread)
-        thread.start()
-        thread.setDaemon(True)
+        if '755871491' in sheet['url']:
+            crawlMusic(sheet['url'], sheet['type_id'])
 
-    for thread in threads:
-        thread.join()
-    """
-    #mysql_conn.commit()
-    #cursor.close()
-    #mysql_conn.close()
+    mysql_conn.commit()
+    cursor.close()
+    mysql_conn.close()
 
     end = datetime.now()
     print("程序执行时间（秒）：" + str((end - start).seconds))
